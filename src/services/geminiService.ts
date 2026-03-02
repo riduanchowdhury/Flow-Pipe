@@ -1,10 +1,19 @@
 import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+let ai: GoogleGenAI | null = null;
+
+function getAI(): GoogleGenAI | null {
+  if (!ai && process.env.GEMINI_API_KEY) {
+    ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  }
+  return ai;
+}
 
 export async function suggestTaskBreakdown(taskTitle: string, taskDescription: string) {
+  const client = getAI();
+  if (!client) return [];
   try {
-    const response = await ai.models.generateContent({
+    const response = await client.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `Break down this task into subtasks: Title: ${taskTitle}, Description: ${taskDescription}. Return a JSON array of strings.`,
       config: {
@@ -19,8 +28,10 @@ export async function suggestTaskBreakdown(taskTitle: string, taskDescription: s
 }
 
 export async function prioritizeTasks(tasks: any[]) {
+  const client = getAI();
+  if (!client) return tasks.map(t => t.id);
   try {
-    const response = await ai.models.generateContent({
+    const response = await client.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `Given these tasks: ${JSON.stringify(tasks)}, suggest an optimal order of completion based on priorities and due dates. Return a JSON array of task IDs in order.`,
       config: {
