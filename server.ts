@@ -96,21 +96,23 @@ db.exec(`
 `);
 
 // Migration: recreate comments table without FK on task_id (needed for discussions)
-const commentsSql = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='comments'").get() as any)?.sql || '';
-if (commentsSql.includes('FOREIGN KEY(task_id)')) {
-  db.exec(`
-    CREATE TABLE comments_new (
-      id TEXT PRIMARY KEY,
-      task_id TEXT,
-      user_id TEXT,
-      content TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(user_id) REFERENCES users(id)
-    );
-    INSERT INTO comments_new SELECT * FROM comments;
-    DROP TABLE comments;
-    ALTER TABLE comments_new RENAME TO comments;
-  `);
+const commentsFKs = db.prepare("PRAGMA foreign_key_list(comments)").all() as any[];
+if (commentsFKs.some((fk: any) => fk.from === 'task_id')) {
+  db.transaction(() => {
+    db.exec(`
+      CREATE TABLE comments_new (
+        id TEXT PRIMARY KEY,
+        task_id TEXT,
+        user_id TEXT,
+        content TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+      );
+      INSERT INTO comments_new SELECT * FROM comments;
+      DROP TABLE comments;
+      ALTER TABLE comments_new RENAME TO comments;
+    `);
+  })();
 }
 
 async function startServer() {
