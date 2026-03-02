@@ -3,11 +3,15 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import { fileURLToPath } from "url";
 import Database from "better-sqlite3";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { v4 as uuidv4 } from "uuid";
 import { suggestTaskBreakdown } from "./src/services/geminiService";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const db = new Database("flowpipe.db");
 
@@ -77,7 +81,6 @@ db.exec(`
     user_id TEXT,
     content TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(task_id) REFERENCES tasks(id),
     FOREIGN KEY(user_id) REFERENCES users(id)
   );
 
@@ -91,6 +94,26 @@ db.exec(`
     FOREIGN KEY(user_id) REFERENCES users(id)
   );
 `);
+
+// Migration: recreate comments table without FK on task_id (needed for discussions)
+const commentsFKs = db.prepare("PRAGMA foreign_key_list(comments)").all() as any[];
+if (commentsFKs.some((fk: any) => fk.from === 'task_id')) {
+  db.transaction(() => {
+    db.exec(`
+      CREATE TABLE comments_new (
+        id TEXT PRIMARY KEY,
+        task_id TEXT,
+        user_id TEXT,
+        content TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+      );
+      INSERT INTO comments_new SELECT * FROM comments;
+      DROP TABLE comments;
+      ALTER TABLE comments_new RENAME TO comments;
+    `);
+  })();
+}
 
 async function startServer() {
   const app = express();
@@ -127,13 +150,12 @@ async function startServer() {
     try {
       db.transaction(() => {
         db.prepare("INSERT INTO users (id, email, password, name) VALUES (?, ?, ?, ?)").run(id, email, hashedPassword, name);
-        // Ensure default workspace exists
+        // Ensure default workspace exists; only add user as member if they are creating it
         const existingWorkspace = db.prepare("SELECT id FROM workspaces WHERE id = ?").get(workspaceId);
         if (!existingWorkspace) {
           db.prepare("INSERT INTO workspaces (id, name, owner_id) VALUES (?, ?, ?)").run(workspaceId, "General Workspace", id);
+          db.prepare("INSERT OR IGNORE INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, ?)").run(workspaceId, id, 'owner');
         }
-        // Add user to workspace members
-        db.prepare("INSERT OR IGNORE INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, ?)").run(workspaceId, id, 'owner');
       })();
       
       const token = jwt.sign({ id, email, name }, JWT_SECRET);
