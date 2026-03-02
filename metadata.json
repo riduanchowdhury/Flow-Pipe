@@ -1,0 +1,7 @@
+{
+  "name": "FlowPipe",
+  "description": "Advanced todo and pipeline management platform for individuals and enterprise teams.",
+  "requestFramePermissions": [
+    "notifications"
+  ]
+}
