@@ -90,6 +90,14 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(user_id) REFERENCES users(id)
   );
+
+  CREATE TABLE IF NOT EXISTS discussions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT,
+    content TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+  );
 `);
 
 async function startServer() {
@@ -127,13 +135,13 @@ async function startServer() {
     try {
       db.transaction(() => {
         db.prepare("INSERT INTO users (id, email, password, name) VALUES (?, ?, ?, ?)").run(id, email, hashedPassword, name);
-        // Ensure default workspace exists
+        // Ensure default workspace exists; only add user if they are creating it
         const existingWorkspace = db.prepare("SELECT id FROM workspaces WHERE id = ?").get(workspaceId);
         if (!existingWorkspace) {
           db.prepare("INSERT INTO workspaces (id, name, owner_id) VALUES (?, ?, ?)").run(workspaceId, "General Workspace", id);
+          // Add workspace creator as owner
+          db.prepare("INSERT OR IGNORE INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, ?)").run(workspaceId, id, 'owner');
         }
-        // Add user to workspace members
-        db.prepare("INSERT OR IGNORE INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, ?)").run(workspaceId, id, 'owner');
       })();
       
       const token = jwt.sign({ id, email, name }, JWT_SECRET);
@@ -279,11 +287,10 @@ async function startServer() {
   // Discussion Routes
   app.get("/api/discussions", authenticate, (req: any, res) => {
     const messages = db.prepare(`
-      SELECT m.*, u.name as user_name, u.avatar as user_avatar 
-      FROM comments m 
-      JOIN users u ON m.user_id = u.id 
-      WHERE m.task_id = 'discussion' 
-      ORDER BY m.created_at ASC
+      SELECT d.*, u.name as user_name, u.avatar as user_avatar 
+      FROM discussions d 
+      JOIN users u ON d.user_id = u.id 
+      ORDER BY d.created_at ASC
     `).all();
     res.json(messages);
   });
@@ -291,12 +298,12 @@ async function startServer() {
   app.post("/api/discussions", authenticate, (req: any, res) => {
     const { content } = req.body;
     const id = uuidv4();
-    db.prepare("INSERT INTO comments (id, task_id, user_id, content) VALUES (?, ?, ?, ?)").run(id, 'discussion', req.user.id, content);
+    db.prepare("INSERT INTO discussions (id, user_id, content) VALUES (?, ?, ?)").run(id, req.user.id, content);
     const message = db.prepare(`
-      SELECT m.*, u.name as user_name, u.avatar as user_avatar 
-      FROM comments m 
-      JOIN users u ON m.user_id = u.id 
-      WHERE m.id = ?
+      SELECT d.*, u.name as user_name, u.avatar as user_avatar 
+      FROM discussions d 
+      JOIN users u ON d.user_id = u.id 
+      WHERE d.id = ?
     `).get(id);
     io.emit("discussion:message", message);
     res.json(message);

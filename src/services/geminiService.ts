@@ -1,8 +1,14 @@
 import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+function getAI(): GoogleGenAI | null {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  return new GoogleGenAI({ apiKey });
+}
 
 export async function suggestTaskBreakdown(taskTitle: string, taskDescription: string) {
+  const ai = getAI();
+  if (!ai) return [];
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
@@ -19,6 +25,8 @@ export async function suggestTaskBreakdown(taskTitle: string, taskDescription: s
 }
 
 export async function prioritizeTasks(tasks: any[]) {
+  const ai = getAI();
+  if (!ai) return tasks.map(t => t.id);
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
